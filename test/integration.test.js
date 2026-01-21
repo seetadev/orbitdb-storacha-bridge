@@ -17,6 +17,10 @@ import { Signer } from "@storacha/client/principal/ed25519";
 import * as Proof from "@storacha/client/proof";
 import { logger } from "../lib/logger.js";
 import {
+  startInMemoryStorachaService,
+  stopInMemoryStorachaService,
+} from "./helpers/in-memory-storacha.js";
+import {
   backupDatabase,
   restoreDatabase,
   restoreDatabaseFromSpace,
@@ -45,6 +49,8 @@ const colors = {
  * @param {Object} options - Configuration options
  * @param {string} options.storachaKey - Storacha private key
  * @param {string} options.storachaProof - Storacha proof
+ * @param {Object} [options.serviceConf] - Service configuration
+ * @param {string|URL} [options.receiptsEndpoint] - Receipts endpoint
  */
 async function displaySpaceAndDIDInfo(options) {
   try {
@@ -61,7 +67,14 @@ async function displaySpaceAndDIDInfo(options) {
     // Initialize Storacha client to get space/DID info
     const principal = Signer.parse(options.storachaKey);
     const store = new StoreMemory();
-    const client = await Client.create({ principal, store });
+    const clientOptions = { principal, store };
+    if (options.serviceConf) {
+      clientOptions.serviceConf = options.serviceConf;
+    }
+    if (options.receiptsEndpoint) {
+      clientOptions.receiptsEndpoint = options.receiptsEndpoint;
+    }
+    const client = await Client.create(clientOptions);
 
     const proof = await Proof.parse(options.storachaProof);
     const space = await client.addSpace(proof);
@@ -131,6 +144,95 @@ describe("OrbitDB Storacha Bridge Integration", () => {
   let sourceNode;
   /** @type {Object|null} Target OrbitDB node instance */
   let targetNode;
+  /** @type {Object|null} In-memory Storacha service info */
+  let inMemoryStoracha;
+  /** @type {boolean} Use in-memory Storacha service */
+  let useInMemoryStoracha = false;
+  /** @type {string|null} Storacha key (agent) for tests */
+  let storachaKey;
+  /** @type {string|null} Storacha proof (space delegation) for tests */
+  let storachaProof;
+  /** @type {Object|null} Service configuration */
+  let serviceConf;
+  /** @type {string|URL|null} Receipts endpoint */
+  let receiptsEndpoint;
+
+  const getStorachaOptions = () => ({
+    storachaKey,
+    storachaProof,
+    serviceConf,
+    receiptsEndpoint,
+    useIPFSNetwork: true,
+    gatewayFallback: false,
+    timeout: 10000,
+    uploadBatchSize: useInMemoryStoracha ? 2 : undefined,
+    uploadMaxConcurrency: useInMemoryStoracha ? 1 : undefined,
+  });
+
+  const getHeliaOptions = () =>
+    useInMemoryStoracha
+      ? {
+          useBootstrap: false,
+          useDHT: false,
+          autoDial: true,
+          minConnections: 1,
+          maxConnections: 5,
+        }
+      : {};
+
+  const connectToInMemoryHelia = async (node, label) => {
+    if (!useInMemoryStoracha || !inMemoryStoracha) {
+      return;
+    }
+    const { heliaPeerId, heliaTcpMultiaddr } = inMemoryStoracha;
+    if (!heliaPeerId || !heliaTcpMultiaddr) {
+      return;
+    }
+
+    try {
+      const { peerIdFromString } = await import("@libp2p/peer-id");
+      const { multiaddr } = await import("@multiformats/multiaddr");
+      const { KEEP_ALIVE } = await import("@libp2p/interface");
+      const peerId = peerIdFromString(heliaPeerId);
+      await node.helia.libp2p.peerStore.patch(peerId, {
+        multiaddrs: [multiaddr(heliaTcpMultiaddr)],
+        tags: {
+          [`${KEEP_ALIVE}-in-memory`]: {
+            value: 100,
+          },
+        },
+      });
+      await node.helia.libp2p.dial(peerId);
+      logger.info(
+        `🟣 Connected ${label} Helia to in-memory Helia peer ${heliaPeerId}`,
+      );
+    } catch (error) {
+      logger.warn(
+        `🟣 Failed to connect ${label} Helia to in-memory peer: ${error.message}`,
+      );
+    }
+  };
+
+  beforeAll(async () => {
+    const forcedLocal =
+      process.env.USE_IN_MEMORY_STORACHA === "1" ||
+      process.env.USE_IN_MEMORY_STORACHA === "true";
+    const missingCredentials =
+      !process.env.STORACHA_KEY || !process.env.STORACHA_PROOF;
+
+    if (forcedLocal || missingCredentials) {
+      useInMemoryStoracha = true;
+      inMemoryStoracha = await startInMemoryStorachaService();
+      storachaKey = inMemoryStoracha.storachaKey;
+      storachaProof = inMemoryStoracha.storachaProof;
+      serviceConf = inMemoryStoracha.serviceConf;
+      receiptsEndpoint = inMemoryStoracha.receiptsEndpoint;
+      logger.info("🧪 Using in-memory Storacha service for integration tests");
+    } else {
+      storachaKey = process.env.STORACHA_KEY;
+      storachaProof = process.env.STORACHA_PROOF;
+    }
+  });
 
   /**
    * @function beforeEach
@@ -144,24 +246,23 @@ describe("OrbitDB Storacha Bridge Integration", () => {
    */
   beforeEach(async () => {
     // Skip tests if no credentials available
-    if (!process.env.STORACHA_KEY || !process.env.STORACHA_PROOF) {
+    if (!storachaKey || !storachaProof) {
       logger.warn("⚠️ Skipping integration tests - no Storacha credentials");
       return;
     }
 
     // Display space and DID information in bright colors
     await displaySpaceAndDIDInfo({
-      storachaKey: process.env.STORACHA_KEY,
-      storachaProof: process.env.STORACHA_PROOF,
+      storachaKey,
+      storachaProof,
+      serviceConf,
+      receiptsEndpoint,
     });
 
     // Clear Storacha space before each test to ensure clean state
     logger.info("🧹 Clearing Storacha space before test...");
     try {
-      const clearResult = await clearStorachaSpace({
-        storachaKey: process.env.STORACHA_KEY,
-        storachaProof: process.env.STORACHA_PROOF,
-      });
+      const clearResult = await clearStorachaSpace(getStorachaOptions());
       if (clearResult.success) {
         logger.info("✅ Space cleared successfully");
       } else {
@@ -202,6 +303,14 @@ describe("OrbitDB Storacha Bridge Integration", () => {
         if (node.helia && typeof node.helia.stop === "function") {
           await node.helia.stop();
         }
+        if (node.libp2p && typeof node.libp2p.stop === "function") {
+          await node.libp2p.stop();
+        } else if (
+          node.helia?.libp2p &&
+          typeof node.helia.libp2p.stop === "function"
+        ) {
+          await node.helia.libp2p.stop();
+        }
         if (node.blockstore && typeof node.blockstore.close === "function") {
           await node.blockstore.close();
         }
@@ -228,11 +337,26 @@ describe("OrbitDB Storacha Bridge Integration", () => {
     // Clean up any remaining OrbitDB directories
     logger.info("🧹 Final test cleanup...");
     await cleanupOrbitDBDirectories();
+
+    if (useInMemoryStoracha) {
+      await stopInMemoryStorachaService(inMemoryStoracha);
+    }
   });
 
   /**
    * @test CompleteBackupAndRestoreCycle
    * @description Tests the complete end-to-end backup and restore workflow
+   *
+   * **CID mappings note:**
+   * This test restores using the CID mapping table returned by `backupDatabase`.
+   * The mapping links OrbitDB block CIDs (zdpu...) to Storacha upload CIDs
+   * (bafy...), so restore can fetch exact blocks without scanning the space.
+   * In production, callers must persist these mappings externally (e.g., a
+   * database row, JSON file, or object store keyed by database address/manifest)
+   * and supply them back to `restoreDatabase`.
+   * For the mapping-free restore path, see:
+   * - "Mapping-independent restore from space"
+   * - "Key-value mapping-independent restore with todos and identity"
    *
    * **Test Flow:**
    * 1. Creates a source OrbitDB database with test entries
@@ -261,7 +385,7 @@ describe("OrbitDB Storacha Bridge Integration", () => {
    */
   test("Complete backup and restore cycle", async () => {
     // Skip if no credentials
-    if (!process.env.STORACHA_KEY || !process.env.STORACHA_PROOF) {
+    if (!storachaKey || !storachaProof) {
       return;
     }
 
@@ -270,7 +394,8 @@ describe("OrbitDB Storacha Bridge Integration", () => {
 
     try {
       // Create source database
-      sourceNode = await createHeliaOrbitDB("-test-source");
+      sourceNode = await createHeliaOrbitDB("-test-source", getHeliaOptions());
+      await connectToInMemoryHelia(sourceNode, "source");
       sourceDB = await sourceNode.orbitdb.open("integration-test", {
         type: "events",
       });
@@ -285,10 +410,7 @@ describe("OrbitDB Storacha Bridge Integration", () => {
       const backupResult = await backupDatabase(
         sourceNode.orbitdb,
         sourceDB.address,
-        {
-          storachaKey: process.env.STORACHA_KEY,
-          storachaProof: process.env.STORACHA_PROOF,
-        },
+        getStorachaOptions(),
       );
       expect(backupResult.success).toBe(true);
       expect(backupResult.manifestCID).toBeTruthy();
@@ -307,10 +429,15 @@ describe("OrbitDB Storacha Bridge Integration", () => {
       }
 
       // Create target node with different suffix for complete isolation
-      targetNode = await createHeliaOrbitDB("-test-target-restore");
+      targetNode = await createHeliaOrbitDB(
+        "-test-target-restore",
+        getHeliaOptions(),
+      );
+      await connectToInMemoryHelia(targetNode, "target");
 
       // Wait for peers to connect before restore operations
       await waitForPeers(targetNode, 5, 10000); // Wait up to 10s, but don't require any peers
+      await connectToInMemoryHelia(targetNode, "target");
 
       // Restore database using the isolated target node with explicit credentials
       const restoreResult = await restoreDatabase(
@@ -318,8 +445,9 @@ describe("OrbitDB Storacha Bridge Integration", () => {
         backupResult.manifestCID,
         backupResult.cidMappings,
         {
-          storachaKey: process.env.STORACHA_KEY,
-          storachaProof: process.env.STORACHA_PROOF,
+          ...getStorachaOptions(),
+          reconnectToInMemoryHelia: () =>
+            connectToInMemoryHelia(targetNode, "target"),
         },
       );
 
@@ -358,6 +486,17 @@ describe("OrbitDB Storacha Bridge Integration", () => {
    * @test MappingIndependentRestore
    * @description Tests the mapping-independent restore feature
    *
+   * **How restore works without mappings:**
+   * `restoreDatabaseFromSpace` lists all uploads in the Storacha space,
+   * downloads the available blocks, and analyzes them to locate OrbitDB
+   * manifests/log heads. From those discovered manifests, it reconstructs
+   * the database without needing an external CID mapping table.
+   *
+   * **Tradeoff with large spaces:**
+   * When a space contains many uploads, this scan-and-analyze approach can be
+   * slower and more expensive because it must enumerate and download many
+   * candidates before it can find the correct manifest/log.
+   *
    * **Test Flow:**
    * 1. Creates a source OrbitDB database with test entries
    * 2. Backs up the database to Storacha
@@ -375,7 +514,7 @@ describe("OrbitDB Storacha Bridge Integration", () => {
    */
   test("Mapping-independent restore from space", async () => {
     // Skip if no credentials
-    if (!process.env.STORACHA_KEY || !process.env.STORACHA_PROOF) {
+    if (!storachaKey || !storachaProof) {
       return;
     }
 
@@ -384,7 +523,11 @@ describe("OrbitDB Storacha Bridge Integration", () => {
 
     try {
       // Create source database
-      sourceNode = await createHeliaOrbitDB("-test-source-space");
+      sourceNode = await createHeliaOrbitDB(
+        "-test-source-space",
+        getHeliaOptions(),
+      );
+      await connectToInMemoryHelia(sourceNode, "source");
       sourceDB = await sourceNode.orbitdb.open("space-restore-test", {
         type: "events",
       });
@@ -404,10 +547,7 @@ describe("OrbitDB Storacha Bridge Integration", () => {
       const backupResult = await backupDatabase(
         sourceNode.orbitdb,
         sourceDB.address,
-        {
-          storachaKey: process.env.STORACHA_KEY,
-          storachaProof: process.env.STORACHA_PROOF,
-        },
+        getStorachaOptions(),
       );
       expect(backupResult.success).toBe(true);
       expect(backupResult.blocksUploaded).toBeGreaterThan(0);
@@ -421,15 +561,21 @@ describe("OrbitDB Storacha Bridge Integration", () => {
       sourceNode = null;
 
       // Create isolated target node
-      targetNode = await createHeliaOrbitDB("-test-target-space");
+      targetNode = await createHeliaOrbitDB(
+        "-test-target-space",
+        getHeliaOptions(),
+      );
+      await connectToInMemoryHelia(targetNode, "target");
 
       // Wait for peers to connect before restore operations
       await waitForPeers(targetNode, 5, 10000); // Wait up to 10s, but don't require any peers
+      await connectToInMemoryHelia(targetNode, "target");
 
       // Restore from space WITHOUT CID mappings (breakthrough feature)
       const restoreResult = await restoreDatabaseFromSpace(targetNode.orbitdb, {
-        storachaKey: process.env.STORACHA_KEY,
-        storachaProof: process.env.STORACHA_PROOF,
+        ...getStorachaOptions(),
+        reconnectToInMemoryHelia: () =>
+          connectToInMemoryHelia(targetNode, "target"),
       });
 
       expect(restoreResult.success).toBe(true);
@@ -482,6 +628,16 @@ describe("OrbitDB Storacha Bridge Integration", () => {
    * @test KeyValueMappingIndependentRestore
    * @description Tests mapping-independent backup & restore for key-value database with identity and access controller
    *
+   * **How restore works without mappings:**
+   * This test uses `restoreDatabaseFromSpace` to scan the space for uploads,
+   * downloads candidate blocks, and identifies the correct manifest/log heads.
+   * The restored entries come from the discovered OrbitDB log rather than a
+   * pre-saved CID mapping table.
+   *
+   * **Tradeoff with large spaces:**
+   * As space size grows, restore time increases because it must list and
+   * inspect more uploads to identify the right database.
+   *
    * **Test Flow:**
    * 1. Creates a source OrbitDB key-value database with identity and access controller
    * 2. Populates with todo entries containing rich data structures
@@ -511,7 +667,7 @@ describe("OrbitDB Storacha Bridge Integration", () => {
    * @timeout 120000 - 2 minutes for network operations
    */
   test("Key-value mapping-independent restore with todos and identity", async () => {
-    if (!process.env.STORACHA_KEY || !process.env.STORACHA_PROOF) {
+    if (!storachaKey || !storachaProof) {
       return;
     }
 
@@ -520,7 +676,11 @@ describe("OrbitDB Storacha Bridge Integration", () => {
 
     try {
       // Create source database with key-value type and access controller
-      sourceNode = await createHeliaOrbitDB("-test-source-keyvalue");
+      sourceNode = await createHeliaOrbitDB(
+        "-test-source-keyvalue",
+        getHeliaOptions(),
+      );
+      await connectToInMemoryHelia(sourceNode, "source");
       sourceDB = await sourceNode.orbitdb.open("todos-keyvalue-test", {
         type: "keyvalue",
         create: true,
@@ -585,10 +745,7 @@ describe("OrbitDB Storacha Bridge Integration", () => {
       const backupResult = await backupDatabase(
         sourceNode.orbitdb,
         sourceDB.address,
-        {
-          storachaKey: process.env.STORACHA_KEY,
-          storachaProof: process.env.STORACHA_PROOF,
-        },
+        getStorachaOptions(),
       );
       expect(backupResult.success).toBe(true);
       expect(backupResult.blocksUploaded).toBeGreaterThan(0);
@@ -604,15 +761,21 @@ describe("OrbitDB Storacha Bridge Integration", () => {
       sourceNode = null;
 
       // Create isolated target node
-      targetNode = await createHeliaOrbitDB("-test-target-keyvalue");
+      targetNode = await createHeliaOrbitDB(
+        "-test-target-keyvalue",
+        getHeliaOptions(),
+      );
+      await connectToInMemoryHelia(targetNode, "target");
 
       // Wait for peers to connect before restore operations
       await waitForPeers(targetNode, 5, 10000); // Wait up to 10s, but don't require any peers
+      await connectToInMemoryHelia(targetNode, "target");
 
       // Restore from space WITHOUT CID mappings (breakthrough feature)
       const restoreResult = await restoreDatabaseFromSpace(targetNode.orbitdb, {
-        storachaKey: process.env.STORACHA_KEY,
-        storachaProof: process.env.STORACHA_PROOF,
+        ...getStorachaOptions(),
+        reconnectToInMemoryHelia: () =>
+          connectToInMemoryHelia(targetNode, "target"),
       });
       logger.info("restoreResult", restoreResult);
       expect(restoreResult.success).toBe(true);
@@ -734,7 +897,7 @@ describe("OrbitDB Storacha Bridge Integration", () => {
    * @timeout 120000 - 2 minutes for network operations
    */
   test("Key-value database with DEL operations - complete backup and restore cycle", async () => {
-    if (!process.env.STORACHA_KEY || !process.env.STORACHA_PROOF) {
+    if (!storachaKey || !storachaProof) {
       return;
     }
 
@@ -743,7 +906,11 @@ describe("OrbitDB Storacha Bridge Integration", () => {
 
     try {
       // Create source database
-      sourceNode = await createHeliaOrbitDB("-test-source-keyvalue-del");
+      sourceNode = await createHeliaOrbitDB(
+        "-test-source-keyvalue-del",
+        getHeliaOptions(),
+      );
+      await connectToInMemoryHelia(sourceNode, "source");
       sourceDB = await sourceNode.orbitdb.open("todos-del-test", {
         type: "keyvalue",
         create: true,
@@ -888,10 +1055,7 @@ describe("OrbitDB Storacha Bridge Integration", () => {
       const backupResult = await backupDatabase(
         sourceNode.orbitdb,
         sourceDB.address,
-        {
-          storachaKey: process.env.STORACHA_KEY,
-          storachaProof: process.env.STORACHA_PROOF,
-        },
+        getStorachaOptions(),
       );
       expect(backupResult.success).toBe(true);
       expect(backupResult.blocksUploaded).toBeGreaterThan(0);
@@ -909,19 +1073,25 @@ describe("OrbitDB Storacha Bridge Integration", () => {
       logger.info("   🧹 Source node completely destroyed");
 
       // **Create isolated target node**
-      targetNode = await createHeliaOrbitDB("-test-target-keyvalue-del");
+      targetNode = await createHeliaOrbitDB(
+        "-test-target-keyvalue-del",
+        getHeliaOptions(),
+      );
+      await connectToInMemoryHelia(targetNode, "target");
       logger.info("\n🎯 Created isolated target node for restoration...");
 
       // Wait for peers to connect before restore operations
       await waitForPeers(targetNode, 5, 10000); // Wait up to 10s, but don't require any peers
+      await connectToInMemoryHelia(targetNode, "target");
 
       // **Restore from space with DEL operations**
       logger.info(
         "\n📥 Restoring database with DEL operations from Storacha...",
       );
       const restoreResult = await restoreDatabaseFromSpace(targetNode.orbitdb, {
-        storachaKey: process.env.STORACHA_KEY,
-        storachaProof: process.env.STORACHA_PROOF,
+        ...getStorachaOptions(),
+        reconnectToInMemoryHelia: () =>
+          connectToInMemoryHelia(targetNode, "target"),
       });
 
       expect(restoreResult.success).toBe(true);
@@ -1043,7 +1213,7 @@ describe("OrbitDB Storacha Bridge Integration", () => {
    * @timeout 120000 - 2 minutes for network operations
    */
   test("Documents database with DEL operations - complete backup and restore cycle", async () => {
-    if (!process.env.STORACHA_KEY || !process.env.STORACHA_PROOF) {
+    if (!storachaKey || !storachaProof) {
       return;
     }
 
@@ -1052,7 +1222,11 @@ describe("OrbitDB Storacha Bridge Integration", () => {
 
     try {
       // Create source documents database
-      sourceNode = await createHeliaOrbitDB("-test-source-docs-del");
+      sourceNode = await createHeliaOrbitDB(
+        "-test-source-docs-del",
+        getHeliaOptions(),
+      );
+      await connectToInMemoryHelia(sourceNode, "source");
       sourceDB = await sourceNode.orbitdb.open("docs-del-test", {
         type: "documents",
         create: true,
@@ -1135,10 +1309,7 @@ describe("OrbitDB Storacha Bridge Integration", () => {
       const backupResult = await backupDatabase(
         sourceNode.orbitdb,
         sourceDB.address,
-        {
-          storachaKey: process.env.STORACHA_KEY,
-          storachaProof: process.env.STORACHA_PROOF,
-        },
+        getStorachaOptions(),
       );
       expect(backupResult.success).toBe(true);
 
@@ -1151,15 +1322,21 @@ describe("OrbitDB Storacha Bridge Integration", () => {
       sourceNode = null;
 
       // **Create isolated target node**
-      targetNode = await createHeliaOrbitDB("-test-target-docs-del");
+      targetNode = await createHeliaOrbitDB(
+        "-test-target-docs-del",
+        getHeliaOptions(),
+      );
+      await connectToInMemoryHelia(targetNode, "target");
 
       // Wait for peers to connect before restore operations
       await waitForPeers(targetNode, 5, 10000); // Wait up to 10s, but don't require any peers
+      await connectToInMemoryHelia(targetNode, "target");
 
       // **Restore from space**
       const restoreResult = await restoreDatabaseFromSpace(targetNode.orbitdb, {
-        storachaKey: process.env.STORACHA_KEY,
-        storachaProof: process.env.STORACHA_PROOF,
+        ...getStorachaOptions(),
+        reconnectToInMemoryHelia: () =>
+          connectToInMemoryHelia(targetNode, "target"),
       });
 
       expect(restoreResult.success).toBe(true);
