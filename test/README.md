@@ -36,12 +36,31 @@ These tests also run **in-memory by default** (same switch as above).
 Validates CAR-based backup/restore behavior and storage persistence. Includes
 fallback/compat checks and file-level storage behaviors.
 
+## Timestamped Backup Tests (`test/timestamped-backup.test.js`)
+
+Validates timestamped CAR backups in a Storacha space:
+
+- Builds a CAR from the full OrbitDB snapshot (manifest, log entries,
+  access controller, identity blocks).
+- Uploads exactly two files per backup:
+  - `backup-<timestamp>-blocks.car` (the data snapshot)
+  - `backup-<timestamp>-metadata.json` (manifest + spaceName + entry counts)
+- Lists all uploads in the space and **discovers metadata files by content**
+  because Storacha returns CIDs only (no filenames).
+- Restores by selecting the latest metadata entry, then fetching the CAR CID
+  referenced by that metadata.
+
+Runs **in-memory by default**. To run against production Storacha:
+
+```bash
+USE_PRODUCTION_STORACHA=1 STORACHA_KEY=... STORACHA_PROOF=... npm run test:timestamped-backup
+```
+
 ## Other Suites
 
 - `test/access-control-integration.test.js`: UCAN access control flows.
 - `test/ipns-restore.test.js`: IPNS-related restore scenarios.
 - `test/p256-ucan-security.test.js`: P-256 UCAN security tests.
-- `test/timestamped-backup.test.js`: timestamped CAR backup behavior.
 
 ## Running Tests
 

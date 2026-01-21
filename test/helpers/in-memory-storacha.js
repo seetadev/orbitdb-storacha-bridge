@@ -16,6 +16,7 @@ import { Message, delegate } from "@ucanto/core";
 import { createServer, handle } from "@storacha/upload-api";
 import { createContext, cleanupContext } from "@storacha/upload-api/test/context";
 import * as ProviderCaps from "@storacha/capabilities/provider";
+import * as TopCaps from "@storacha/capabilities/top";
 import * as DidMailto from "@storacha/did-mailto";
 import { Absentee } from "@ucanto/principal";
 import * as ed25519 from "@ucanto/principal/ed25519";
@@ -477,7 +478,17 @@ async function createLocalCredentials(context) {
   const spaceProof = await delegate({
     issuer: space,
     audience: spaceAgent,
-    capabilities: [{ can: "*", with: space.did() }],
+    capabilities: [
+      { can: TopCaps.top.can, with: space.did() },
+      { can: "space/blob/add", with: space.did() },
+      { can: "space/blob/list", with: space.did() },
+      { can: "space/blob/remove", with: space.did() },
+      { can: "space/index/add", with: space.did() },
+      { can: "filecoin/offer", with: space.did() },
+      { can: "upload/add", with: space.did() },
+      { can: "upload/list", with: space.did() },
+      { can: "upload/remove", with: space.did() },
+    ],
   });
 
   const accountDid = DidMailto.fromEmail("test@example.com");
