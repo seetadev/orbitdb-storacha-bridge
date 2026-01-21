@@ -214,13 +214,18 @@ describe("OrbitDB Storacha Bridge Integration", () => {
   };
 
   beforeAll(async () => {
-    const forcedLocal =
-      process.env.USE_IN_MEMORY_STORACHA === "1" ||
-      process.env.USE_IN_MEMORY_STORACHA === "true";
-    const missingCredentials =
-      !process.env.STORACHA_KEY || !process.env.STORACHA_PROOF;
+    const useProduction =
+      process.env.USE_PRODUCTION_STORACHA === "1" ||
+      process.env.USE_PRODUCTION_STORACHA === "true";
 
-    if (forcedLocal || missingCredentials) {
+    if (useProduction) {
+      storachaKey = process.env.STORACHA_KEY;
+      storachaProof = process.env.STORACHA_PROOF;
+      logger.info("🧪 Using production Storacha service for integration tests");
+      logger.info(
+        "   ↪ Set USE_PRODUCTION_STORACHA=1 and provide STORACHA_KEY/STORACHA_PROOF",
+      );
+    } else {
       useInMemoryStoracha = true;
       inMemoryStoracha = await startInMemoryStorachaService();
       storachaKey = inMemoryStoracha.storachaKey;
@@ -228,9 +233,9 @@ describe("OrbitDB Storacha Bridge Integration", () => {
       serviceConf = inMemoryStoracha.serviceConf;
       receiptsEndpoint = inMemoryStoracha.receiptsEndpoint;
       logger.info("🧪 Using in-memory Storacha service for integration tests");
-    } else {
-      storachaKey = process.env.STORACHA_KEY;
-      storachaProof = process.env.STORACHA_PROOF;
+      logger.info(
+        "   ↪ To use production Storacha, set USE_PRODUCTION_STORACHA=1 and provide STORACHA_KEY/STORACHA_PROOF",
+      );
     }
   });
 
