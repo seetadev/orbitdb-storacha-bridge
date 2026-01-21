@@ -46,6 +46,8 @@ let heliaStartPromise;
 let heliaWsMultiaddr;
 let heliaTcpMultiaddr;
 let heliaPeerId;
+let gatewayServer;
+let gatewayUrl;
 
 async function ensureHelia() {
   if (heliaNode) {
@@ -89,6 +91,82 @@ async function ensureHelia() {
   }
   heliaNode = await heliaStartPromise;
   return heliaNode;
+}
+
+async function startGatewayServer() {
+  if (gatewayServer && gatewayUrl) {
+    return { server: gatewayServer, url: gatewayUrl };
+  }
+
+  const helia = await ensureHelia();
+  const fs = unixfs(helia);
+
+  const server = http.createServer(async (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    if (!req.url || !req.url.startsWith("/ipfs/")) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+
+    const cid = req.url.slice("/ipfs/".length);
+    if (!cid) {
+      res.writeHead(400);
+      res.end();
+      return;
+    }
+
+    try {
+      const chunks = [];
+      for await (const chunk of fs.cat(cid)) {
+        chunks.push(chunk);
+      }
+      const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+      const bytes = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+      }
+      res.writeHead(200, { "Content-Type": "application/octet-stream" });
+      res.end(Buffer.from(bytes));
+    } catch (error) {
+      res.writeHead(404);
+      res.end();
+      heliaLogger(
+        colorize(
+          colors.violet,
+          `🟣 Gateway miss for ${cid}: ${error?.message ?? error}`,
+        ),
+      );
+    }
+  });
+
+  await new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Failed to bind gateway HTTP server");
+  }
+
+  gatewayServer = server;
+  gatewayUrl = `http://127.0.0.1:${address.port}`;
+  heliaLogger(
+    colorize(colors.violet, `🟣 Gateway started at ${gatewayUrl}`),
+  );
+
+  return { server, url: gatewayUrl };
 }
 
 async function importCarToHelia(bytes) {
@@ -474,6 +552,7 @@ function buildServiceConf(url, serviceDid) {
 
 export async function startInMemoryStorachaService() {
   await ensureHelia();
+  const gateway = await startGatewayServer();
   const context = await createContext({
     requirePaymentPlan: false,
     http: createCorsHttp(),
@@ -487,6 +566,7 @@ export async function startInMemoryStorachaService() {
     context,
     server,
     url,
+    gatewayUrl: gateway.url,
     serviceConf,
     receiptsEndpoint,
     helia: heliaNode,
@@ -504,6 +584,12 @@ export async function stopInMemoryStorachaService(service) {
 
   if (service.server) {
     await new Promise((resolve) => service.server.close(() => resolve()));
+  }
+
+  if (gatewayServer) {
+    await new Promise((resolve) => gatewayServer.close(() => resolve()));
+    gatewayServer = null;
+    gatewayUrl = null;
   }
 
   if (service.context) {

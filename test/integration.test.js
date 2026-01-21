@@ -166,6 +166,10 @@ describe("OrbitDB Storacha Bridge Integration", () => {
     receiptsEndpoint,
     useIPFSNetwork: true,
     gatewayFallback: false,
+    gateway:
+      useInMemoryStoracha && inMemoryStoracha?.gatewayUrl
+        ? inMemoryStoracha.gatewayUrl
+        : undefined,
     timeout: 10000,
     uploadBatchSize: useInMemoryStoracha ? 2 : undefined,
     uploadMaxConcurrency: useInMemoryStoracha ? 1 : undefined,

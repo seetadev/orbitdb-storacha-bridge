@@ -168,12 +168,8 @@ The logger supports printf-style formatting:
 
 ## Testing
 
-Ensure you have Storacha credentials in your `.env` file.
-Use npm test commands to run various test suites including integration tests and verbose output.
-
-### CAR Storage Tests
-
-The `car-storage.test.js` suite provides validation of the CAR (Content Addressable Archive) storage layer that enables persistent file-based storage for OrbitDB databases. The **Full OrbitDB Integration with Persistence** test demonstrates database lifecycle management: creating an OrbitDB instance with CAR storage, adding todo entries, persisting to CAR files, closing the database, reopening with a new OrbitDB instance, and verifying all data is perfectly recovered. This test validates that CAR storage can serve as a reliable persistence layer for OrbitDB's entry, heads, and index storage, ensuring data survives across application restarts.
+See `test/README.md` for detailed test documentation, modes (in-memory vs production),
+and how to run each suite.
 
 ## Contributing
 
@@ -185,5 +181,4 @@ The `car-storage.test.js` suite provides validation of the CAR (Content Addressa
 ## License
 
 MIT License
-
 

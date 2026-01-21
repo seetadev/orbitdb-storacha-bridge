@@ -21,13 +21,94 @@ import {
   initializeStorachaClient,
 } from "../lib/orbitdb-storacha-bridge.js";
 import { backupDatabaseCAR, restoreFromSpaceCAR } from "../lib/backup-car.js";
+import {
+  startInMemoryStorachaService,
+  stopInMemoryStorachaService,
+} from "./helpers/in-memory-storacha.js";
 
 describe("Network Download Tests", () => {
   let heliaNode;
+  let storachaKey;
+  let storachaProof;
+  let serviceConf;
+  let receiptsEndpoint;
+  let inMemoryStoracha;
+  let useInMemoryStoracha = false;
+  let useProductionStoracha = false;
+
+  const getStorachaOptions = () => ({
+    storachaKey,
+    storachaProof,
+    serviceConf,
+    receiptsEndpoint,
+    gateway:
+      useInMemoryStoracha && inMemoryStoracha?.gatewayUrl
+        ? inMemoryStoracha.gatewayUrl
+        : undefined,
+  });
+
+  const connectToInMemoryHelia = async (node, label) => {
+    if (!useInMemoryStoracha || !inMemoryStoracha) {
+      return;
+    }
+    const { heliaPeerId, heliaTcpMultiaddr } = inMemoryStoracha;
+    if (!heliaPeerId || !heliaTcpMultiaddr) {
+      return;
+    }
+
+    try {
+      const { peerIdFromString } = await import("@libp2p/peer-id");
+      const { multiaddr } = await import("@multiformats/multiaddr");
+      const { KEEP_ALIVE } = await import("@libp2p/interface");
+      const peerId = peerIdFromString(heliaPeerId);
+      await node.helia.libp2p.peerStore.patch(peerId, {
+        multiaddrs: [multiaddr(heliaTcpMultiaddr)],
+        tags: {
+          [`${KEEP_ALIVE}-in-memory`]: {
+            value: 100,
+          },
+        },
+      });
+      await node.helia.libp2p.dial(peerId);
+      console.log(
+        `🟣 Connected ${label} Helia to in-memory Helia peer ${heliaPeerId}`,
+      );
+    } catch (error) {
+      console.log(
+        `🟣 Failed to connect ${label} Helia to in-memory peer: ${error.message}`,
+      );
+    }
+  };
+
+  beforeAll(() => {
+    useProductionStoracha =
+      process.env.USE_PRODUCTION_STORACHA === "1" ||
+      process.env.USE_PRODUCTION_STORACHA === "true";
+    if (!useProductionStoracha) {
+      useInMemoryStoracha = true;
+    }
+  });
 
   beforeEach(async () => {
+    if (useProductionStoracha) {
+      storachaKey = process.env?.STORACHA_KEY;
+      storachaProof = process.env?.STORACHA_PROOF;
+      if (!storachaKey || !storachaProof) {
+        console.log(
+          "Storacha credentials not available for production mode; Storacha-specific tests will be skipped",
+        );
+      }
+    } else {
+      inMemoryStoracha = await startInMemoryStorachaService();
+      storachaKey = inMemoryStoracha.storachaKey;
+      storachaProof = inMemoryStoracha.storachaProof;
+      serviceConf = inMemoryStoracha.serviceConf;
+      receiptsEndpoint = inMemoryStoracha.receiptsEndpoint;
+    }
+
     // Create a Helia instance for testing
     heliaNode = await createHeliaOrbitDB("-network-test");
+    await connectToInMemoryHelia(heliaNode, "shared");
   });
 
   afterEach(async () => {
@@ -47,6 +128,11 @@ describe("Network Download Tests", () => {
       await heliaNode.datastore.close();
     }
     await cleanupOrbitDBDirectories();
+
+    if (useInMemoryStoracha && inMemoryStoracha) {
+      await stopInMemoryStorachaService(inMemoryStoracha);
+      inMemoryStoracha = null;
+    }
   });
 
   /**
@@ -139,15 +225,6 @@ describe("Network Download Tests", () => {
    * Helper function to upload content to Storacha using space credentials
    */
   async function uploadToStoracha(content) {
-    const storachaKey =
-      process.env?.STORACHA_KEY ||
-      (typeof process !== "undefined" ? process.env?.STORACHA_KEY : undefined);
-    const storachaProof =
-      process.env?.STORACHA_PROOF ||
-      (typeof process !== "undefined"
-        ? process.env?.STORACHA_PROOF
-        : undefined);
-
     if (!storachaKey || !storachaProof) {
       throw new Error(
         "Storacha credentials required: STORACHA_KEY and STORACHA_PROOF must be set",
@@ -158,7 +235,12 @@ describe("Network Download Tests", () => {
       typeof content === "string" ? new TextEncoder().encode(content) : content;
 
     // Initialize Storacha client
-    const client = await initializeStorachaClient(storachaKey, storachaProof);
+    const client = await initializeStorachaClient(
+      storachaKey,
+      storachaProof,
+      serviceConf,
+      receiptsEndpoint,
+    );
 
     // Create a File object for upload
     const blob = new Blob([bytes], { type: "application/octet-stream" });
@@ -295,10 +377,16 @@ describe("Network Download Tests", () => {
     }, 60000);
   });
 
+  /**
+   * @description Exercises download behavior for content uploaded to Storacha,
+   * including network-first retrieval, gateway fallback, and chunked DAG traversal.
+   * In in-memory mode this uses the local upload-api server; in production mode
+   * it requires STORACHA_KEY/STORACHA_PROOF.
+   */
   describe("downloadBlockFromStoracha() with Storacha upload", () => {
     it("should upload to Storacha and download using unixfs.cat()", async () => {
       // Skip if credentials are not available
-      if (!process.env?.STORACHA_KEY || !process.env?.STORACHA_PROOF) {
+      if (useProductionStoracha && (!storachaKey || !storachaProof)) {
         console.log("Skipping test: Storacha credentials not available");
         expect(true).toBe(true);
         return;
@@ -321,6 +409,8 @@ describe("Network Download Tests", () => {
         useIPFSNetwork: true,
         gatewayFallback: true,
         timeout: 30000,
+        reconnectToInMemoryHelia: () =>
+          connectToInMemoryHelia(heliaNode, "shared"),
       });
 
       // Verify content matches
@@ -331,7 +421,7 @@ describe("Network Download Tests", () => {
 
     it("should handle DAG traversal for chunked files uploaded to Storacha", async () => {
       // Skip if credentials are not available
-      if (!process.env?.STORACHA_KEY || !process.env?.STORACHA_PROOF) {
+      if (useProductionStoracha && (!storachaKey || !storachaProof)) {
         console.log("Skipping test: Storacha credentials not available");
         expect(true).toBe(true);
         return;
@@ -362,6 +452,8 @@ describe("Network Download Tests", () => {
         useIPFSNetwork: true,
         gatewayFallback: true,
         timeout: 60000,
+        reconnectToInMemoryHelia: () =>
+          connectToInMemoryHelia(heliaNode, "shared"),
       });
 
       // Verify all content is retrieved
@@ -372,7 +464,7 @@ describe("Network Download Tests", () => {
 
     it("should download from Storacha using gateway fallback", async () => {
       // Skip if credentials are not available
-      if (!process.env?.STORACHA_KEY || !process.env?.STORACHA_PROOF) {
+      if (useProductionStoracha && (!storachaKey || !storachaProof)) {
         console.log("Skipping test: Storacha credentials not available");
         expect(true).toBe(true);
         return;
@@ -413,6 +505,8 @@ describe("Network Download Tests", () => {
           useIPFSNetwork: true,
           gatewayFallback: true,
           timeout: 5000,
+          reconnectToInMemoryHelia: () =>
+            connectToInMemoryHelia(heliaNode, "shared"),
         });
 
         // Verify gateway was used
@@ -429,6 +523,10 @@ describe("Network Download Tests", () => {
     }, 60000);
   });
 
+  /**
+   * @description Validates CAR-based restore paths when downloads come from
+   * the IPFS network versus the gateway, and ensures restore results match.
+   */
   describe("restoreFromSpaceCAR() network integration", () => {
     beforeEach(() => {
       // Clear any mocks before each test
@@ -438,6 +536,7 @@ describe("Network Download Tests", () => {
     it("should use network download when useIPFSNetwork is true", async () => {
       // Create source node and backup
       const sourceNode = await createHeliaOrbitDB("-source-network");
+      await connectToInMemoryHelia(sourceNode, "source");
       const sourceDB = await sourceNode.orbitdb.open("test-network-restore", {
         type: "events",
       });
@@ -451,6 +550,7 @@ describe("Network Download Tests", () => {
         sourceDB.address,
         {
           spaceName: "test-network-space",
+          ...getStorachaOptions(),
         },
       );
 
@@ -462,6 +562,7 @@ describe("Network Download Tests", () => {
 
       // Create target node for restore
       const targetNode = await createHeliaOrbitDB("-target-network");
+      await connectToInMemoryHelia(targetNode, "target");
 
       // Wait for peers to connect before checking count
       await waitForPeers(targetNode, 5, 10000); // Wait up to 10s, but don't require any peers
@@ -472,6 +573,9 @@ describe("Network Download Tests", () => {
         spaceName: "test-network-space",
         useIPFSNetwork: true,
         gatewayFallback: true,
+        reconnectToInMemoryHelia: () =>
+          connectToInMemoryHelia(targetNode, "target"),
+        ...getStorachaOptions(),
       });
 
       expect(restored.success).toBe(true);
@@ -495,6 +599,7 @@ describe("Network Download Tests", () => {
     it("should fallback to gateway when network fails", async () => {
       // Create backup first
       const sourceNode = await createHeliaOrbitDB("-source-fallback");
+      await connectToInMemoryHelia(sourceNode, "source");
       const sourceDB = await sourceNode.orbitdb.open("test-fallback", {
         type: "events",
       });
@@ -507,6 +612,7 @@ describe("Network Download Tests", () => {
         sourceDB.address,
         {
           spaceName: "test-fallback-space",
+          ...getStorachaOptions(),
         },
       );
 
@@ -518,6 +624,7 @@ describe("Network Download Tests", () => {
 
       // Create target node
       const targetNode = await createHeliaOrbitDB("-target-fallback");
+      await connectToInMemoryHelia(targetNode, "target");
 
       // Wait for peers to connect before checking count
       await waitForPeers(targetNode, 5, 10000); // Wait up to 10s, but don't require any peers
@@ -534,6 +641,9 @@ describe("Network Download Tests", () => {
         spaceName: "test-fallback-space",
         useIPFSNetwork: true,
         gatewayFallback: true,
+        reconnectToInMemoryHelia: () =>
+          connectToInMemoryHelia(targetNode, "target"),
+        ...getStorachaOptions(),
       });
 
       // Should succeed via gateway fallback
@@ -557,6 +667,7 @@ describe("Network Download Tests", () => {
     it("should use gateway when useIPFSNetwork is false", async () => {
       // Create backup
       const sourceNode = await createHeliaOrbitDB("-source-gateway-only");
+      await connectToInMemoryHelia(sourceNode, "source");
       const sourceDB = await sourceNode.orbitdb.open("test-gateway-only", {
         type: "events",
       });
@@ -569,6 +680,7 @@ describe("Network Download Tests", () => {
         sourceDB.address,
         {
           spaceName: "test-gateway-only-space",
+          ...getStorachaOptions(),
         },
       );
 
@@ -579,6 +691,7 @@ describe("Network Download Tests", () => {
 
       // Create target node
       const targetNode = await createHeliaOrbitDB("-target-gateway-only");
+      await connectToInMemoryHelia(targetNode, "target");
 
       // Wait for peers to connect before checking count
       await waitForPeers(targetNode, 5, 10000); // Wait up to 10s, but don't require any peers
@@ -591,6 +704,7 @@ describe("Network Download Tests", () => {
       const restored = await restoreFromSpaceCAR(targetNode.orbitdb, {
         spaceName: "test-gateway-only-space",
         useIPFSNetwork: false,
+        ...getStorachaOptions(),
       });
 
       // Should succeed via gateway
@@ -614,6 +728,10 @@ describe("Network Download Tests", () => {
     }, 120000);
   });
 
+  /**
+   * @description Verifies behavior toggles for network vs gateway download
+   * and fallback configuration.
+   */
   describe("Configuration options", () => {
     it("downloadBlockFromStoracha should respect useIPFSNetwork option", async () => {
       const testContent = "Test content for config";
@@ -636,6 +754,8 @@ describe("Network Download Tests", () => {
         useIPFSNetwork: true,
         gatewayFallback: false,
         timeout: 30000,
+        reconnectToInMemoryHelia: () =>
+          connectToInMemoryHelia(heliaNode, "shared"),
       });
 
       expect(spy).toHaveBeenCalled();
@@ -693,6 +813,8 @@ describe("Network Download Tests", () => {
         useIPFSNetwork: true,
         gatewayFallback: true,
         timeout: 5000,
+        reconnectToInMemoryHelia: () =>
+          connectToInMemoryHelia(heliaNode, "shared"),
       });
 
       expect(fetchSpy).toHaveBeenCalled();
@@ -706,6 +828,8 @@ describe("Network Download Tests", () => {
           useIPFSNetwork: true,
           gatewayFallback: false,
           timeout: 5000,
+          reconnectToInMemoryHelia: () =>
+            connectToInMemoryHelia(heliaNode, "shared"),
         }),
       ).rejects.toThrow();
 
@@ -746,6 +870,10 @@ describe("Network Download Tests", () => {
     });
   });
 
+  /**
+   * @description Ensures network and gateway paths return consistent content
+   * and database restore results.
+   */
   describe("Result consistency", () => {
     it("Network and gateway downloads should produce identical results", async () => {
       const testContent = "Consistency test content";
@@ -801,6 +929,7 @@ describe("Network Download Tests", () => {
     it("Restore from network should match restore from gateway", async () => {
       // Create backup
       const sourceNode = await createHeliaOrbitDB("-source-consistency");
+      await connectToInMemoryHelia(sourceNode, "source");
       const sourceDB = await sourceNode.orbitdb.open("test-consistency", {
         type: "events",
       });
@@ -814,6 +943,7 @@ describe("Network Download Tests", () => {
         sourceDB.address,
         {
           spaceName: "test-consistency-space",
+          ...getStorachaOptions(),
         },
       );
 
@@ -824,6 +954,7 @@ describe("Network Download Tests", () => {
 
       // Restore using network
       const networkNode = await createHeliaOrbitDB("-network-consistency");
+      await connectToInMemoryHelia(networkNode, "network");
 
       // Wait for peers to connect before attempting network restore
       // Network restore requires peers, so wait for at least 5 connections
@@ -834,6 +965,9 @@ describe("Network Download Tests", () => {
         spaceName: "test-consistency-space",
         useIPFSNetwork: true,
         gatewayFallback: false,
+        reconnectToInMemoryHelia: () =>
+          connectToInMemoryHelia(networkNode, "network"),
+        ...getStorachaOptions(),
       });
 
       expect(networkRestored.success).toBe(true);
@@ -841,9 +975,11 @@ describe("Network Download Tests", () => {
 
       // Restore using gateway only
       const gatewayNode = await createHeliaOrbitDB("-gateway-consistency");
+      await connectToInMemoryHelia(gatewayNode, "gateway");
       const gatewayRestored = await restoreFromSpaceCAR(gatewayNode.orbitdb, {
         spaceName: "test-consistency-space",
         useIPFSNetwork: false,
+        ...getStorachaOptions(),
       });
 
       expect(gatewayRestored.success).toBe(true);
@@ -875,6 +1011,9 @@ describe("Network Download Tests", () => {
     }, 180000);
   });
 
+  /**
+   * @description Covers large payload handling and timeouts.
+   */
   describe("Edge cases", () => {
     it("should handle very large files", async () => {
       if (!heliaNode.unixfs) {
