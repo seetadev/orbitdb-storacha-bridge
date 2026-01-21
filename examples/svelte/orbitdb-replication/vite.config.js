@@ -62,4 +62,8 @@ export default defineConfig({
       ],
     },
   },
+  test: {
+    include: ["src/**/*.spec.js"],
+    exclude: ["e2e/**", "src/routes/**/*.svelte.spec.js"],
+  },
 });
