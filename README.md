@@ -20,7 +20,7 @@
     - [Use Cases for OrbitDB-Storacha-Bridge](#use-cases-for-orbitdb-storacha-bridge)
     - [Architecture Notes](#architecture-notes)
   - [What This Does](#what-this-does)
-  - [Roadmap](#roadmap)
+  - [Roadmap (Current version: 0.4.2, as of 21.01.2026)](#roadmap-current-version-042-as-of-21012026)
   - [Installation](#installation)
   - [Environment Setup](#environment-setup)
   - [Demo](#demo)
@@ -88,7 +88,7 @@ The project includes **Svelte components** for browser-based demos and integrati
 
 - [ ] v0.4.3 (Jan 2026): Latest-backup pointer (single CID) to avoid listing via the Storacha SDK and restore from the IPFS network for initial OrbitDB syncs.
   - [ ] After each backup, write a small pointer record (JSON) that stores the latest metadata CID, CAR CID, and last heads (block CID).
-  - [ ] Store that pointer in a user-controlled place (local storage, QR/share link, or file download).
+  - [ ] Store that pointer in a user-controlled place (local storage, QR/share link, WebAuthN largetBlog extension or file download).
 - [ ] v0.5.0 (Feb 2026): OrbitDB CustomStorage (StorachaStorage) ([issue 23](https://github.com/NiKrause/orbitdb-storacha-bridge/issues/23)).
 - [ ] v0.6.0 (Mar 2026): WebAuthN + varsig signing/verification (Ed25519 and P-256) for OrbitDB oplog. https://github.com/ChainAgnostic/varsig/blob/main/README.md
 - [ ] v0.6.1 (Mar 2026): WebAuthN + SimpleEncryption example that uses WebAuthN+PRF key material for encrypted backups and restore.
