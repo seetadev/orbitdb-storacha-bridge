@@ -84,21 +84,22 @@ The project includes **Svelte components** for browser-based demos and integrati
 - Backup/restore functionality with hash and identity preservation
 - OrbitDB CAR file storage [OrbitDB CustomStorage](https://github.com/orbitdb/orbitdb/blob/main/docs/STORAGE.md)
 
-## Roadmap
+## Roadmap (Current version: 0.4.2, as of 21.01.2026)
 
-- [ ] Latest-backup pointer (single CID) to avoid listing via the Storacha SDK and restore from the IPFS network for initial OrbitDB syncs:
+- [ ] v0.4.3 (Jan 2026): Latest-backup pointer (single CID) to avoid listing via the Storacha SDK and restore from the IPFS network for initial OrbitDB syncs.
   - [ ] After each backup, write a small pointer record (JSON) that stores the latest metadata CID, CAR CID, and last heads (block CID).
   - [ ] Store that pointer in a user-controlled place (local storage, QR/share link, or file download).
-- [ ] Implement WebAuthN-varsic signing/verification (Ed25519 and P-256) for OrbitDB oplog. https://github.com/ChainAgnostic/varsig/blob/main/README.md
-- [ ] OrbitDB CustomStorage: implement OrbitDB StorachaStorage ([issue 23](https://github.com/NiKrause/orbitdb-storacha-bridge/issues/23)).
-- [ ] WebAuthN + SimpleEncryption: provide an example that uses WebAuthN+PRF as key materia for encrypted backups and decrypts for restore.
-- [ ] WebAuthN + OrbitDB AccessController: implement an access controller that stores a UCAN (instead of only a DID) for admin/write access.
+- [ ] v0.5.0 (Feb 2026): OrbitDB CustomStorage (StorachaStorage) ([issue 23](https://github.com/NiKrause/orbitdb-storacha-bridge/issues/23)).
+- [ ] v0.6.0 (Mar 2026): WebAuthN + varsig signing/verification (Ed25519 and P-256) for OrbitDB oplog. https://github.com/ChainAgnostic/varsig/blob/main/README.md
+- [ ] v0.6.1 (Mar 2026): WebAuthN + SimpleEncryption example that uses WebAuthN+PRF key material for encrypted backups and restore.
+- [ ] v0.7.0 (Apr 2026): WebAuthN + OrbitDB AccessController (store a UCAN instead of only a DID for admin/write access).
   - [ ] Alice (authenticated via UCAN or Storacha credentials) can delegate/revoke access for Bob with custom/default capabilities ([issue 16](https://github.com/NiKrause/orbitdb-storacha-bridge/issues/16)). See [WebAuthN Upload Wall](https://github.com/NiKrause/ucan-upload-wall/tree/browser-only/web) and the [live demo](https://bafybeibdcnp7pr26okzr6kbygcounsz3klyg3vydxwwovmz2ljyzfmprre.ipfs.w3s.link/).
-- [ ] Add Storacha Backup & Restore Svelte widget with WebAuthN-varsic UCAN signing/verification (Ed25519/P-256).
-- [ ] Add Storacha Backup & Restore React widget with WebAuthN-varsic UCAN signing/verification (Ed25519/P-256).
-- [ ] Add Storacha Backup & Restore React widget with WebAuthN-varsic UCAN delegation (Ed25519/P-256).
-- [ ] Upgrade to UCAN 1.0 support
-- [ ] Implement social backup between devices with DKG (decentralised key generation)
+- [ ] v0.7.1 (May 2026): Storacha Backup & Restore Svelte widget with WebAuthN-varsig UCAN signing/verification (Ed25519/P-256).
+- [ ] v0.7.2 (May 2026): Storacha Backup & Restore React widget with WebAuthN-varsig UCAN signing/verification (Ed25519/P-256).
+- [ ] v0.7.3 (May 2026): Storacha Backup & Restore React widget with WebAuthN-varsig UCAN delegation (Ed25519/P-256).
+- [ ] v0.7.4 (May 2026): UI enhancement for the Storacha Backup & Restore widget (timestamped backup restore and management).
+- [ ] v0.8.0 (Jun 2026): Upgrade to UCAN 1.0 support.
+- [ ] v0.9.0 (Jul 2026): Social backup between devices with DKG (decentralized key generation).
 
 Read more on Medium: [Bridging OrbitDB with Storacha: Decentralized Database Backups](https://medium.com/@akashjana663/bridging-orbitdb-with-storacha-decentralized-database-backups-44c7bee5c395)
 
