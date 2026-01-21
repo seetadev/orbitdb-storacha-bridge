@@ -100,6 +100,7 @@ The project includes **Svelte components** for browser-based demos and integrati
 - [ ] v0.7.4 (May 2026): UI enhancement for the Storacha Backup & Restore widget (timestamped backup restore and management).
 - [ ] v0.8.0 (Jun 2026): Upgrade to UCAN 1.0 support.
 - [ ] v0.9.0 (Jul 2026): Social backup between devices with DKG (decentralized key generation).
+- [ ] v0.10.0 (Aug 2027): WebAuthN + Roaming Credentials: Have a browser and a mobile with one Yubikey creating one and the same DID and replicating the same OrbitDB
 
 Read more on Medium: [Bridging OrbitDB with Storacha: Decentralized Database Backups](https://medium.com/@akashjana663/bridging-orbitdb-with-storacha-decentralized-database-backups-44c7bee5c395)
 
