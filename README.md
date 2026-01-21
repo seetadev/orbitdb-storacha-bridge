@@ -89,6 +89,11 @@ The project includes **Svelte components** for browser-based demos and integrati
 
 - [ ] CustomStorage - implement OrbitDB StorachaStorage [OrbitDB CustomStorage issue 23](https://github.com/NiKrause/orbitdb-storacha-bridge/issues/23)
 - [ ] Alice when authenticated via a UCAN or Storacha Credentials should be able to delegate/revoke her access rights to Bob (with custom/default capabilities) [via WebAuthN (P-256)](https://github.com/NiKrause/orbitdb-storacha-bridge/issues/16) see: [WebAuthN Upload Wall](https://github.com/NiKrause/ucan-upload-wall/tree/browser-only/web) and [live demo](https://bafybeibdcnp7pr26okzr6kbygcounsz3klyg3vydxwwovmz2ljyzfmprre.ipfs.w3s.link/)
+- [ ] Latest-backup pointer (single CID) to avoid listing via Storacha SDK:
+  - [ ] After each backup, write a small pointer record (JSON) that stores the latest metadata CID and optional CAR CID.
+  - [ ] Store that pointer in a user-controlled place (OrbitDB metadata log, local storage + export, QR/share link, or IPNS record).
+  - [ ] Restore uses the pointer directly, bypassing `upload.list`/`space/blob/list`; tests should accept a provided pointer for in-memory mode.
+  - [ ] Add CLI/helper to update and resolve the pointer; document recommended storage/rotation strategy.
 
 
 Read more on Medium: [Bridging OrbitDB with Storacha: Decentralized Database Backups](https://medium.com/@akashjana663/bridging-orbitdb-with-storacha-decentralized-database-backups-44c7bee5c395)
@@ -181,4 +186,3 @@ and how to run each suite.
 ## License
 
 MIT License
-
