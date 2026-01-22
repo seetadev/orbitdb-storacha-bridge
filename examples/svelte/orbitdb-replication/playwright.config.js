@@ -6,7 +6,7 @@ const port = process.env.PORT
 
 export default defineConfig({
   webServer: {
-    command: `npm run dev -- --port ${port}`,
+    command: `npm run dev -- --host 127.0.0.1 --port ${port}`,
     port: port,
     reuseExistingServer: !process.env.CI,
     env: {
@@ -15,6 +15,6 @@ export default defineConfig({
   },
   testDir: "e2e",
   use: {
-    baseURL: `http://localhost:${port}`,
+    baseURL: `http://127.0.0.1:${port}`,
   },
 });
