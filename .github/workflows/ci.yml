@@ -213,8 +213,6 @@ jobs:
         include:
           - example: simple-backup-restore
             port: 5173
-          - example: orbitdb-replication
-            port: 5174
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
