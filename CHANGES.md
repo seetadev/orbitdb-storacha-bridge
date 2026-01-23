@@ -5,6 +5,7 @@
 ### Added
 - IPFS network restore with gateway fallback and new network download tests.
 - In-memory Storacha test mode with local gateway support and improved integration test harness.
+- Timestamped backup example and dedicated test suite.
 - CAR backup documentation plus expanded test and example docs.
 - New E2E coverage for Svelte examples.
 
