@@ -984,7 +984,7 @@ describe("Network Download Tests", () => {
       expect(new TextDecoder().decode(networkBytes)).toBe(testContent);
     }, 60000);
 
-    it.skip("Restore from network should match restore from gateway", async () => {
+    it("Restore from network should match restore from gateway", async () => {
       // Create backup
       const sourceNode = await createHeliaOrbitDB(
         "-source-consistency",
@@ -1020,9 +1020,8 @@ describe("Network Download Tests", () => {
       );
       await connectToInMemoryHelia(networkNode, "network");
 
-      // Wait for peers to connect before attempting network restore
-      // Network restore requires peers, so wait for at least 5 connections
-      await waitForPeers(networkNode, 5, 30000); // Wait up to 30s for 5 peers
+      // Wait briefly for peer connectivity to settle before network restore.
+      await waitForPeers(networkNode, 1, 10000);
 
       logPeerCount(networkNode, "Result consistency - network restore");
       const networkRestored = await restoreFromSpaceCAR(networkNode.orbitdb, {
@@ -1034,6 +1033,11 @@ describe("Network Download Tests", () => {
         ...getStorachaOptions(),
       });
 
+      if (!networkRestored.success) {
+        throw new Error(
+          `Network restore failed: ${networkRestored.error || "unknown error"}`,
+        );
+      }
       expect(networkRestored.success).toBe(true);
       const networkEntries = await networkRestored.database.all();
 
@@ -1049,6 +1053,11 @@ describe("Network Download Tests", () => {
         ...getStorachaOptions(),
       });
 
+      if (!gatewayRestored.success) {
+        throw new Error(
+          `Gateway restore failed: ${gatewayRestored.error || "unknown error"}`,
+        );
+      }
       expect(gatewayRestored.success).toBe(true);
       const gatewayEntries = await gatewayRestored.database.all();
 

@@ -480,6 +480,7 @@ async function createLocalCredentials(context) {
     audience: spaceAgent,
     capabilities: [
       { can: TopCaps.top.can, with: space.did() },
+      { can: "assert/index", with: space.did() },
       { can: "space/blob/add", with: space.did() },
       { can: "space/blob/list", with: space.did() },
       { can: "space/blob/remove", with: space.did() },
